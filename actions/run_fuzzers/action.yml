@@ -101,11 +101,13 @@ runs:
           -e REPORT_TIMEOUTS="${{ inputs.report-timeouts }}" \
           -e REPORT_OOMS="${{ inputs.report-ooms }}" \
           -v "$GITHUB_WORKSPACE:/github/workspace" \
+          -v "$GITHUB_EVENT_PATH:$GITHUB_EVENT_PATH" \
           -e GITHUB_WORKSPACE=/github/workspace \
           -e GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
           -e GITHUB_SHA="$GITHUB_SHA" \
           -e GITHUB_REF="$GITHUB_REF" \
           -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+          -e GITHUB_EVENT_PATH="$GITHUB_EVENT_PATH" \
           gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1 \
           -c "sed -i \"s/SANITIZERS = \['address', 'memory', 'undefined', 'coverage'\]/SANITIZERS = ['address', 'memory', 'undefined', 'coverage', 'none']/\" /opt/oss-fuzz/infra/cifuzz/config_utils.py && python3 /opt/oss-fuzz/infra/cifuzz/run_fuzzers_entrypoint.py"
 
