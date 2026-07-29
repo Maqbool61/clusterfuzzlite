@@ -30,8 +30,6 @@ inputs:
       Token for GitHub API.
       You should use "secrets.GITHUB_TOKEN" in your workflow file, do not
       hardcode the token.
-      TODO(https://github.com/google/oss-fuzz/pull/5841#discussion_r639393361):
-      Document locking this down.
     required: true
   storage-repo:
     description: |
@@ -73,23 +71,62 @@ inputs:
     required: false
     default: true
 runs:
-  using: 'docker'
-  image: 'docker://gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1'
-  env:
-    FUZZ_SECONDS: ${{ inputs.fuzz-seconds }}
-    MODE: ${{ inputs.mode }}
-    LANGUAGE: ${{ inputs.language }}
-    DRY_RUN: ${{ inputs.dry-run}}
-    SANITIZER: ${{ inputs.sanitizer }}
-    GITHUB_TOKEN: ${{ inputs.github-token }}
-    LOW_DISK_SPACE: 'True'
-    GIT_STORE_REPO: ${{ inputs.storage-repo }}
-    GIT_STORE_BRANCH: ${{ inputs.storage-repo-branch }}
-    GIT_STORE_BRANCH_COVERAGE: ${{ inputs.storage-repo-branch-coverage }}
-    REPORT_UNREPRODUCIBLE_CRASHES: ${{ inputs.report-unreproducible-crashes }}
-    OUTPUT_SARIF: ${{ inputs.output-sarif }}
-    MINIMIZE_CRASHES: ${{ inputs.minimize-crashes }}
-    CFL_PLATFORM: 'github'
-    PARALLEL_FUZZING: ${{ inputs.parallel-fuzzing }}
-    REPORT_TIMEOUTS: ${{ inputs.report-timeouts }}
-    REPORT_OOMS: ${{ inputs.report-ooms}}
+  using: 'composite'
+  steps:
+    # js-sanitizer-none patch (EGC#910 / google/oss-fuzz#15907):
+    # config_utils.py rejects SANITIZER=none but compile requires it for JS projects.
+    # Add 'none' to the SANITIZERS allowlist before the entrypoint validates it.
+    - name: Patch CIFuzz sanitizer allowlist for JavaScript
+      if: ${{ inputs.language == 'javascript' && inputs.sanitizer == 'none' }}
+      shell: bash
+      run: |
+        docker pull gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1
+        docker run --rm \
+          --entrypoint /bin/bash \
+          -e FUZZ_SECONDS="${{ inputs.fuzz-seconds }}" \
+          -e MODE="${{ inputs.mode }}" \
+          -e LANGUAGE="${{ inputs.language }}" \
+          -e DRY_RUN="${{ inputs.dry-run }}" \
+          -e SANITIZER="${{ inputs.sanitizer }}" \
+          -e GITHUB_TOKEN="${{ inputs.github-token }}" \
+          -e LOW_DISK_SPACE="True" \
+          -e GIT_STORE_REPO="${{ inputs.storage-repo }}" \
+          -e GIT_STORE_BRANCH="${{ inputs.storage-repo-branch }}" \
+          -e GIT_STORE_BRANCH_COVERAGE="${{ inputs.storage-repo-branch-coverage }}" \
+          -e REPORT_UNREPRODUCIBLE_CRASHES="${{ inputs.report-unreproducible-crashes }}" \
+          -e OUTPUT_SARIF="${{ inputs.output-sarif }}" \
+          -e MINIMIZE_CRASHES="${{ inputs.minimize-crashes }}" \
+          -e CFL_PLATFORM="github" \
+          -e PARALLEL_FUZZING="${{ inputs.parallel-fuzzing }}" \
+          -e REPORT_TIMEOUTS="${{ inputs.report-timeouts }}" \
+          -e REPORT_OOMS="${{ inputs.report-ooms }}" \
+          -v "$GITHUB_WORKSPACE:/github/workspace" \
+          -e GITHUB_WORKSPACE=/github/workspace \
+          -e GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+          -e GITHUB_SHA="$GITHUB_SHA" \
+          -e GITHUB_REF="$GITHUB_REF" \
+          -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+          gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1 \
+          -c "sed -i \"s/SANITIZERS = \['address', 'memory', 'undefined', 'coverage'\]/SANITIZERS = ['address', 'memory', 'undefined', 'coverage', 'none']/\" /opt/oss-fuzz/infra/cifuzz/config_utils.py && python3 /opt/oss-fuzz/infra/cifuzz/run_fuzzers_entrypoint.py"
+
+    - name: Run Fuzzers (standard path)
+      if: ${{ !(inputs.language == 'javascript' && inputs.sanitizer == 'none') }}
+      uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1
+      env:
+        FUZZ_SECONDS: ${{ inputs.fuzz-seconds }}
+        MODE: ${{ inputs.mode }}
+        LANGUAGE: ${{ inputs.language }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        SANITIZER: ${{ inputs.sanitizer }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        LOW_DISK_SPACE: 'True'
+        GIT_STORE_REPO: ${{ inputs.storage-repo }}
+        GIT_STORE_BRANCH: ${{ inputs.storage-repo-branch }}
+        GIT_STORE_BRANCH_COVERAGE: ${{ inputs.storage-repo-branch-coverage }}
+        REPORT_UNREPRODUCIBLE_CRASHES: ${{ inputs.report-unreproducible-crashes }}
+        OUTPUT_SARIF: ${{ inputs.output-sarif }}
+        MINIMIZE_CRASHES: ${{ inputs.minimize-crashes }}
+        CFL_PLATFORM: 'github'
+        PARALLEL_FUZZING: ${{ inputs.parallel-fuzzing }}
+        REPORT_TIMEOUTS: ${{ inputs.report-timeouts }}
+        REPORT_OOMS: ${{ inputs.report-ooms }}

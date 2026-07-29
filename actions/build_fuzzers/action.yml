@@ -48,24 +48,58 @@ inputs:
       Token for GitHub API.
       You should use "secrets.GITHUB_TOKEN" in your workflow file, do not
       hardcode the token.
-      TODO(https://github.com/google/oss-fuzz/pull/5841#discussion_r639393361):
-      Document locking this down.
     required: false
 runs:
-  using: 'docker'
-  image: 'docker://gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1'
-  env:
-    ALLOWED_BROKEN_TARGETS_PERCENTAGE: ${{ inputs.allowed-broken-targets-percentage}}
-    BAD_BUILD_CHECK: ${{ inputs.bad-build-check }}
-    UPLOAD_BUILD: ${{ inputs.upload-build }}
-    LANGUAGE: ${{ inputs.language }}
-    DRY_RUN: ${{ inputs.dry-run}}
-    SANITIZER: ${{ inputs.sanitizer }}
-    PROJECT_SRC_PATH: ${{ inputs.project-src-path }}
-    GITHUB_TOKEN: ${{ inputs.github-token }}
-    GIT_STORE_REPO: ${{ inputs.storage-repo }}
-    GIT_STORE_BRANCH: ${{ inputs.storage-repo-branch }}
-    GIT_STORE_BRANCH_COVERAGE: ${{ inputs.storage-repo-branch-coverage }}
-    CFL_PLATFORM: 'github'
-    LOW_DISK_SPACE: 'True'
-    KEEP_UNAFFECTED_FUZZ_TARGETS: ${{ inputs.keep-unaffected-fuzz-targets }}
+  using: 'composite'
+  steps:
+    # js-sanitizer-none patch (EGC#910 / google/oss-fuzz#15907):
+    # config_utils.py rejects SANITIZER=none but compile requires it for JS projects.
+    # Add 'none' to the SANITIZERS allowlist before the entrypoint validates it.
+    - name: Patch CIFuzz sanitizer allowlist for JavaScript
+      if: ${{ inputs.language == 'javascript' && inputs.sanitizer == 'none' }}
+      shell: bash
+      run: |
+        docker pull gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1
+        docker run --rm \
+          --entrypoint /bin/bash \
+          -e ALLOWED_BROKEN_TARGETS_PERCENTAGE="${{ inputs.allowed-broken-targets-percentage }}" \
+          -e BAD_BUILD_CHECK="${{ inputs.bad-build-check }}" \
+          -e UPLOAD_BUILD="${{ inputs.upload-build }}" \
+          -e LANGUAGE="${{ inputs.language }}" \
+          -e DRY_RUN="${{ inputs.dry-run }}" \
+          -e SANITIZER="${{ inputs.sanitizer }}" \
+          -e PROJECT_SRC_PATH="${{ inputs.project-src-path }}" \
+          -e GITHUB_TOKEN="${{ inputs.github-token }}" \
+          -e GIT_STORE_REPO="${{ inputs.storage-repo }}" \
+          -e GIT_STORE_BRANCH="${{ inputs.storage-repo-branch }}" \
+          -e GIT_STORE_BRANCH_COVERAGE="${{ inputs.storage-repo-branch-coverage }}" \
+          -e CFL_PLATFORM="github" \
+          -e LOW_DISK_SPACE="True" \
+          -e KEEP_UNAFFECTED_FUZZ_TARGETS="${{ inputs.keep-unaffected-fuzz-targets }}" \
+          -v "$GITHUB_WORKSPACE:/github/workspace" \
+          -e GITHUB_WORKSPACE=/github/workspace \
+          -e GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+          -e GITHUB_SHA="$GITHUB_SHA" \
+          -e GITHUB_REF="$GITHUB_REF" \
+          -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+          gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1 \
+          -c "sed -i \"s/SANITIZERS = \['address', 'memory', 'undefined', 'coverage'\]/SANITIZERS = ['address', 'memory', 'undefined', 'coverage', 'none']/\" /opt/oss-fuzz/infra/cifuzz/config_utils.py && python3 /opt/oss-fuzz/infra/cifuzz/build_fuzzers_entrypoint.py"
+
+    - name: Build Fuzzers (standard path)
+      if: ${{ !(inputs.language == 'javascript' && inputs.sanitizer == 'none') }}
+      uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1
+      env:
+        ALLOWED_BROKEN_TARGETS_PERCENTAGE: ${{ inputs.allowed-broken-targets-percentage }}
+        BAD_BUILD_CHECK: ${{ inputs.bad-build-check }}
+        UPLOAD_BUILD: ${{ inputs.upload-build }}
+        LANGUAGE: ${{ inputs.language }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        SANITIZER: ${{ inputs.sanitizer }}
+        PROJECT_SRC_PATH: ${{ inputs.project-src-path }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GIT_STORE_REPO: ${{ inputs.storage-repo }}
+        GIT_STORE_BRANCH: ${{ inputs.storage-repo-branch }}
+        GIT_STORE_BRANCH_COVERAGE: ${{ inputs.storage-repo-branch-coverage }}
+        CFL_PLATFORM: 'github'
+        LOW_DISK_SPACE: 'True'
+        KEEP_UNAFFECTED_FUZZ_TARGETS: ${{ inputs.keep-unaffected-fuzz-targets }}
